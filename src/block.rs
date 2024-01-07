@@ -1,9 +1,11 @@
 use anyhow::{Ok, Result};
+use serde::{Deserialize, Serialize};
 use std::time::{self, UNIX_EPOCH};
+use tracing::error;
 
 use crate::proof_of_work::ProofOfWork;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Block {
     timestamp: u128,         //当前时间戳，也就是区块创建的时间
     data: String,            //区块存储的实际有效信息，也就是交易
@@ -27,6 +29,24 @@ impl Block {
         block.hash = hash;
         block.nonce = nonce;
         Ok(block)
+    }
+
+    pub fn serialize(&self) -> Result<String> {
+        let data = serde_json::to_string(self).map_err(|e| {
+            error!("Serialize block err: {e}");
+            e
+        })?;
+
+        Ok(data)
+    }
+
+    pub fn deserialize(data: &str) -> Result<Block> {
+        let data = serde_json::from_str(data).map_err(|e| {
+            error!("Deserialize block err: {e}");
+            e
+        })?;
+
+        Ok(data)
     }
 
     pub fn get_hash(&self) -> String {
