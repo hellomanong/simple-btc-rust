@@ -3,7 +3,7 @@ use std::str::from_utf8;
 use crate::block::Block;
 use anyhow::{anyhow, Result};
 use sled::{
-    transaction::{ConflictableTransactionError, TransactionError, Transactional},
+    transaction::{ConflictableTransactionError, TransactionError},
     IVec,
 };
 use tracing::info;
@@ -16,24 +16,20 @@ pub struct Blockchain {
 
 const DB_FILE: &str = "btc_data";
 const BLOCKS: &str = "blocks";
-const BLOCKS_LAST: &str = "blocks_last";
 const LAST: &str = "last";
 impl Blockchain {
     pub fn new_block_chain() -> Result<Self> {
         let db = sled::open(DB_FILE).unwrap();
 
         let bucket = db.open_tree(BLOCKS).unwrap();
-        let bucket_last = db.open_tree(BLOCKS_LAST).unwrap();
-
         let genesis = new_genesis_block()?;
-        let data = bucket_last.get(LAST)?;
 
-        let tip = match data {
+        let tip = match bucket.get(LAST)? {
             Some(iv) => from_utf8(iv.as_ref())?.into(),
             None => {
                 let genesis_json = genesis.serialize()?;
                 bucket.insert(genesis.get_hash().as_str(), genesis_json.as_str())?;
-                bucket_last.insert(LAST, genesis_json.as_str())?;
+                bucket.insert(LAST, genesis_json.as_str())?;
                 genesis.get_hash()
             }
         };
@@ -44,53 +40,75 @@ impl Blockchain {
 
     pub fn add_block(&mut self, data: String) -> Result<()> {
         let db = self.db.open_tree(BLOCKS)?;
-        let db_last = self.db.open_tree(BLOCKS_LAST)?;
 
-        let res: Result<(), TransactionError<anyhow::Error>> = [db, db_last].transaction(|tx_db| {
-            let block_db = &tx_db[0];
-            let last_db = &tx_db[1];
-            match last_db.get(LAST)? {
-                Some(iv) => match from_utf8(iv.as_ref()) {
-                    Ok(v) => {
-                        let last_hash = v.into();
-                        let block = Block::new_block(last_hash, data.clone())
-                            .map_err(|e| ConflictableTransactionError::Abort(anyhow!(e)))?;
+        let res: Result<String, TransactionError<anyhow::Error>> =
+            db.transaction(|tx_db: &sled::transaction::TransactionalTree| {
+                match tx_db.get(LAST)? {
+                    Some(iv) => match from_utf8(iv.as_ref()) {
+                        Ok(_) => {
+                            let block = Block::new_block(self.tip.clone(), data.clone())
+                                .map_err(|e| ConflictableTransactionError::Abort(anyhow!(e)))?;
 
-                        block_db.insert(
-                            block.get_hash().as_str(),
-                            block
-                                .serialize()
-                                .map_err(|e| ConflictableTransactionError::Abort(anyhow!(e)))?
-                                .as_str(),
-                        )?;
+                            tx_db.insert(
+                                block.get_hash().as_str(),
+                                block
+                                    .serialize()
+                                    .map_err(|e| ConflictableTransactionError::Abort(anyhow!(e)))?
+                                    .as_str(),
+                            )?;
 
-                        last_db.insert(LAST, block.get_hash().as_str())?;
-                        Ok(())
-                    }
-                    Err(e) => Err(ConflictableTransactionError::Abort(anyhow!(e))),
-                },
-                None => Err(ConflictableTransactionError::Abort(anyhow!(
-                    "Get key=={}, return None",
-                    LAST
-                ))),
-            }
-        });
+                            tx_db.insert(LAST, block.get_hash().as_str())?;
+                            Ok(block.get_hash())
+                        }
+                        Err(e) => Err(ConflictableTransactionError::Abort(anyhow!(e))),
+                    },
+                    None => Err(ConflictableTransactionError::Abort(anyhow!(
+                        "Get key=={}, return None",
+                        LAST
+                    ))),
+                }
+            });
 
         match res {
-            Ok(_) => Ok(()),
+            Ok(v) => {
+                self.tip = v;
+                Ok(())
+            }
             Err(e) => Err(anyhow!(e)),
         }
     }
 
-    pub fn iter_blocks(&self) -> Result<impl Iterator<Item = Block>> {
-        let db = self.db.open_tree(BLOCKS)?;
-        let data = db.iter();
-        Ok(StorageIter::new(data))
+    pub fn iterator(&self) -> BlockChainIter {
+        BlockChainIter {
+            hash: self.tip.clone(),
+            db: self.db.clone(),
+        }
     }
 }
 
 pub fn new_genesis_block() -> Result<Block> {
     Block::new_block("".into(), "Genesis Block".into())
+}
+
+pub struct BlockChainIter {
+    hash: String,
+    db: sled::Db,
+}
+
+impl BlockChainIter {
+    pub fn next(&mut self) -> Result<Block> {
+        let db = self.db.open_tree(BLOCKS)?;
+        match db.get(self.hash.clone())? {
+            Some(iv) => {
+                let data = from_utf8(iv.as_ref())?;
+                let bc = Block::deserialize(data)?;
+                self.hash = bc.get_prehash();
+                Ok(bc)
+            }
+
+            None => Err(anyhow!("Get block, return None")),
+        }
+    }
 }
 
 pub struct StorageIter<T> {
@@ -129,7 +147,6 @@ impl TryFrom<std::prelude::v1::Result<(IVec, IVec), sled::Error>> for Block {
             Err(e) => return Err(anyhow!(e)),
         };
 
-        info!("-----data:{data}-----");
         Block::deserialize(data.as_str())
     }
 }
