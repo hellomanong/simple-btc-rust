@@ -1,16 +1,18 @@
-use std::str::from_utf8;
+use std::{fs, process, str::from_utf8};
 
-use crate::block::Block;
+use crate::{block::Block, transaction::Transaction};
 use anyhow::{anyhow, Result};
 use sled::{
     transaction::{ConflictableTransactionError, TransactionError},
     IVec,
 };
-use tracing::info;
+use tracing::error;
 
-#[derive(Debug)]
+const GENESISCOINBASEDATA: &str = "GenesisCoinBaseData";
+
+#[derive(Debug, Clone)]
 pub struct Blockchain {
-    tip: String,
+    pub tip: String,
     db: sled::Db,
 }
 
@@ -19,26 +21,46 @@ const BLOCKS: &str = "blocks";
 const LAST: &str = "last";
 impl Blockchain {
     pub fn new_block_chain() -> Result<Self> {
-        let db = sled::open(DB_FILE).unwrap();
+        if db_exists() == false {
+            error!("No existing blockchian found, Create one first");
+            return Err(anyhow!("No existing blockchian found, Create one first"));
+        }
 
-        let bucket = db.open_tree(BLOCKS).unwrap();
-        let genesis = new_genesis_block()?;
-
+        let db = sled::open(DB_FILE)?;
+        let bucket = db.open_tree(BLOCKS)?;
         let tip = match bucket.get(LAST)? {
             Some(iv) => from_utf8(iv.as_ref())?.into(),
-            None => {
-                let genesis_json = genesis.serialize()?;
-                bucket.insert(genesis.get_hash().as_str(), genesis_json.as_str())?;
-                bucket.insert(LAST, genesis_json.as_str())?;
-                genesis.get_hash()
-            }
+            None => return Err(anyhow!("Get last info, return None")),
         };
 
         let block_chain = Self { tip, db };
         Ok(block_chain)
     }
 
-    pub fn add_block(&mut self, data: String) -> Result<()> {
+    pub fn create_block_chain(address: String) -> Result<Self> {
+        if db_exists() {
+            error!("Blockchian already exist");
+            return Err(anyhow!("Blockchian already exist"));
+        }
+        let db = sled::open(DB_FILE).unwrap();
+
+        let bucket = db.open_tree(BLOCKS).unwrap();
+
+        let tx = Transaction::new_coin_base_tx(address, GENESISCOINBASEDATA.into());
+        let genesis = new_genesis_block(tx)?;
+
+        let genesis_json = genesis.serialize()?;
+        bucket.insert(genesis.get_hash().as_str(), genesis_json.as_str())?;
+        bucket.insert(LAST, genesis.get_hash().as_str())?;
+
+        let block_chain = Self {
+            tip: genesis.get_hash(),
+            db,
+        };
+        Ok(block_chain)
+    }
+
+    pub fn add_block(&mut self, txes: Vec<Transaction>) -> Result<()> {
         let db = self.db.open_tree(BLOCKS)?;
 
         let res: Result<String, TransactionError<anyhow::Error>> =
@@ -46,7 +68,7 @@ impl Blockchain {
                 match tx_db.get(LAST)? {
                     Some(iv) => match from_utf8(iv.as_ref()) {
                         Ok(_) => {
-                            let block = Block::new_block(self.tip.clone(), data.clone())
+                            let block = Block::new_block(self.tip.clone(), txes.clone())
                                 .map_err(|e| ConflictableTransactionError::Abort(anyhow!(e)))?;
 
                             tx_db.insert(
@@ -86,8 +108,12 @@ impl Blockchain {
     }
 }
 
-pub fn new_genesis_block() -> Result<Block> {
-    Block::new_block("".into(), "Genesis Block".into())
+pub fn new_genesis_block(coinbase: Transaction) -> Result<Block> {
+    Block::new_block("".into(), vec![coinbase])
+}
+
+pub fn db_exists() -> bool {
+    fs::metadata(DB_FILE).is_ok()
 }
 
 pub struct BlockChainIter {

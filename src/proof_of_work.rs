@@ -1,6 +1,5 @@
 use anyhow::Result;
 use std::{cmp::Ordering, ops::Shl};
-use tracing::info;
 
 use num_bigint::{BigInt, ToBigInt};
 
@@ -28,7 +27,7 @@ impl ProofOfWork {
         let data = format!(
             "{}:{}:{}:{}:{}",
             self.block.get_prehash(),
-            self.block.get_data(),
+            self.block.hash_transactions(),
             self.block.get_timestamp(),
             TARGET_BITS,
             nonce
@@ -39,7 +38,7 @@ impl ProofOfWork {
     pub fn run(&self) -> Result<(u128, String)> {
         let mut nonce = 0;
         let mut hash: String = "".into();
-        println!("Mining the block containing {}", self.block.get_data());
+        // println!("Mining the block containing {}", self.block.);
         while nonce < u128::MAX {
             hash = self.prepare_data(nonce);
             hash = sha256::digest(hash);

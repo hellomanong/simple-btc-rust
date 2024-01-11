@@ -3,23 +3,23 @@ use serde::{Deserialize, Serialize};
 use std::time::{self, UNIX_EPOCH};
 use tracing::error;
 
-use crate::proof_of_work::ProofOfWork;
+use crate::{proof_of_work::ProofOfWork, transaction::Transaction};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Block {
-    timestamp: u128,         //当前时间戳，也就是区块创建的时间
-    data: String,            //区块存储的实际有效信息，也就是交易
-    prev_block_hash: String, //前一个块的哈希，即父哈希
-    hash: String,            //当前块的哈希 (pre_block_hash+timestamp+data)
-    nonce: u128,
+    pub timestamp: u128,                //当前时间戳，也就是区块创建的时间
+    pub transactions: Vec<Transaction>, //区块存储的实际有效信息，也就是交易
+    pub prev_block_hash: String,        //前一个块的哈希，即父哈希
+    pub hash: String,                   //当前块的哈希 (pre_block_hash+timestamp+data)
+    pub nonce: u128,
 }
 
 impl Block {
-    pub fn new_block(prev_block_hash: String, data: String) -> Result<Self> {
+    pub fn new_block(prev_block_hash: String, transactions: Vec<Transaction>) -> Result<Self> {
         let now = time::SystemTime::now().duration_since(UNIX_EPOCH)?;
         let mut block = Self {
             timestamp: now.as_millis(),
-            data: data,
+            transactions: transactions,
             prev_block_hash: prev_block_hash,
             ..Default::default()
         };
@@ -49,12 +49,18 @@ impl Block {
         Ok(data)
     }
 
-    pub fn get_hash(&self) -> String {
-        self.hash.clone()
+    pub fn hash_transactions(&self) -> String {
+        let mut tx_hashes = vec![];
+        for tx in &self.transactions {
+            tx_hashes.extend(tx.id.as_bytes());
+        }
+
+        let hash = sha256::digest(tx_hashes);
+        hash
     }
 
-    pub fn get_data(&self) -> String {
-        self.data.clone()
+    pub fn get_hash(&self) -> String {
+        self.hash.clone()
     }
 
     pub fn get_timestamp(&self) -> u128 {
