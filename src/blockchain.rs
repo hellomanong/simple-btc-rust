@@ -71,7 +71,7 @@ impl Blockchain {
 }
 
 impl Blockchain {
-    pub fn add_block(&mut self, txes: Vec<Transaction>) -> Result<()> {
+    pub fn mine_block(&mut self, txes: Vec<Transaction>) -> Result<()> {
         let db = self.db.open_tree(BLOCKS)?;
 
         let res: Result<String, TransactionError<anyhow::Error>> =
@@ -172,6 +172,35 @@ impl Blockchain {
         }
 
         Ok(utxo)
+    }
+
+    pub fn find_spentable_outputs(
+        &self,
+        address: &str,
+        amount: isize,
+        // isize：余额， map：<String：address， Vec：index of txoutput>
+    ) -> Result<(isize, HashMap<String, Vec<isize>>)> {
+        let mut unspent_outputs = HashMap::<String, Vec<isize>>::default();
+        let unspent_txs = self.find_unspent_transactions(address)?;
+        let mut accumulated = 0;
+
+        'Work: for tx in unspent_txs {
+            for (index, out) in tx.vout.iter().enumerate() {
+                if out.can_be_unlocked_with(address) && accumulated < amount {
+                    accumulated += out.value;
+                    let vec_index = unspent_outputs
+                        .entry(tx.id.clone())
+                        .or_insert(vec![index as _]);
+
+                    vec_index.push(index as _);
+                    if accumulated >= amount {
+                        break 'Work;
+                    }
+                }
+            }
+        }
+
+        Ok((accumulated, unspent_outputs))
     }
 
     pub fn iterator(&self) -> BlockChainIter {

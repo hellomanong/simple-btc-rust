@@ -6,7 +6,7 @@ use blockchain::Blockchain;
 use clap::Parser;
 use cli::Cli;
 
-use crate::proof_of_work::ProofOfWork;
+use crate::{proof_of_work::ProofOfWork, transaction::Transaction};
 
 mod block;
 mod blockchain;
@@ -41,6 +41,12 @@ fn main() -> Result<()> {
             }
 
             println!("Balance of {}:{}", address, balance);
+        }
+        cli::Commands::Send { from, to, amount } => {
+            let mut bc = Blockchain::new_block_chain()?;
+            let tx = Transaction::new_utxo_transction(from, to, amount, &bc)?;
+            bc.mine_block(vec![tx]);
+            println!("Success!");
         }
         cli::Commands::PrintChain => {
             let bc = Blockchain::new_block_chain()?;

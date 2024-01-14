@@ -30,4 +30,13 @@ pub enum Commands {
         #[arg(short, long)]
         address: String,
     },
+    #[command(name = "send")]
+    Send {
+        #[arg(short, long)]
+        from: String,
+        #[arg(short, long)]
+        to: String,
+        #[arg(short, long)]
+        amount: isize,
+    },
 }
