@@ -32,6 +32,16 @@ fn main() -> Result<()> {
             let bc = Blockchain::create_block_chain(address)?;
             println!("Done");
         }
+        cli::Commands::GetBalance { address } => {
+            let bc = Blockchain::new_block_chain()?;
+            let utxos = bc.find_utxo(address.as_str())?;
+            let mut balance = 0;
+            for out in utxos {
+                balance += out.value;
+            }
+
+            println!("Balance of {}:{}", address, balance);
+        }
         cli::Commands::PrintChain => {
             let bc = Blockchain::new_block_chain()?;
             let mut iterator = bc.iterator();

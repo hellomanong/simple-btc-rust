@@ -25,4 +25,9 @@ pub enum Commands {
         #[arg(short, long)]
         address: String,
     },
+    #[command(name = "getbalance")]
+    GetBalance {
+        #[arg(short, long)]
+        address: String,
+    },
 }
