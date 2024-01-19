@@ -55,7 +55,7 @@ impl Blockchain {
 
         let bucket = db.open_tree(BLOCKS).unwrap();
 
-        let tx = Transaction::new_coin_base_tx(address, GENESISCOINBASEDATA.into());
+        let tx = Transaction::new_coin_base_tx(address, GENESISCOINBASEDATA.into())?;
         let genesis = new_genesis_block(tx)?;
 
         let genesis_json = genesis.serialize()?;
@@ -112,7 +112,7 @@ impl Blockchain {
     }
 
     // 暂时从所有的区块中获取为花费的交易
-    pub fn find_unspent_transactions(&self, address: &str) -> Result<Vec<Transaction>> {
+    pub fn find_unspent_transactions(&self, pubkey_hash: &str) -> Result<Vec<Transaction>> {
         let mut unsepent_txs = vec![];
         // vec中存储的是一笔交易中的已经花费的输出的索引
         // 使用vec 是因为，这笔交易中包含，不确定几个人的交易输出
@@ -136,14 +136,14 @@ impl Blockchain {
                     }
 
                     // 一笔交易虽然有多条输出，属于这个地址的输出只有一条
-                    if out.can_be_unlocked_with(address) {
+                    if out.is_locked_with_key(pubkey_hash) {
                         unsepent_txs.push(tx.clone());
                     }
                 }
 
                 if !tx.is_coinbase() {
                     for i in tx.vin {
-                        if i.can_unlock_output_with(address) {
+                        if i.uses_key(pubkey_hash) {
                             let vec_txos = spent_txos.entry(i.txid).or_insert(vec![i.vout]);
                             vec_txos.push(i.vout);
                         }
@@ -159,16 +159,18 @@ impl Blockchain {
         Ok(unsepent_txs)
     }
 
-    pub fn find_utxo(&self, address: &str) -> Result<Vec<TxOutput>> {
-        let unspent_txs = self.find_unspent_transactions(address)?;
+    pub fn find_utxo(&self, pubkey_hash: &str) -> Result<Vec<TxOutput>> {
+        let unspent_txs = self.find_unspent_transactions(pubkey_hash)?;
 
         let mut utxo = vec![];
         for tx in unspent_txs {
-            for out in tx.vout {
-                if out.can_be_unlocked_with(address) {
-                    utxo.push(out);
-                }
-            }
+            let outs: Vec<TxOutput> = tx
+                .vout
+                .into_iter()
+                .filter(|out| out.is_locked_with_key(pubkey_hash))
+                .collect();
+
+            utxo.extend(outs);
         }
 
         Ok(utxo)
@@ -176,17 +178,17 @@ impl Blockchain {
 
     pub fn find_spentable_outputs(
         &self,
-        address: &str,
+        pubkey_hash: &str,
         amount: isize,
         // isize：余额， map：<String：address， Vec：index of txoutput>
     ) -> Result<(isize, HashMap<String, Vec<isize>>)> {
         let mut unspent_outputs = HashMap::<String, Vec<isize>>::default();
-        let unspent_txs = self.find_unspent_transactions(address)?;
+        let unspent_txs = self.find_unspent_transactions(pubkey_hash)?;
         let mut accumulated = 0;
 
         'Work: for tx in unspent_txs {
             for (index, out) in tx.vout.iter().enumerate() {
-                if out.can_be_unlocked_with(address) && accumulated < amount {
+                if out.is_locked_with_key(pubkey_hash) && accumulated < amount {
                     accumulated += out.value;
                     let vec_index = unspent_outputs
                         .entry(tx.id.clone())
@@ -237,45 +239,5 @@ impl BlockChainIter {
 
             None => Err(anyhow!("Get block, return None")),
         }
-    }
-}
-
-pub struct StorageIter<T> {
-    data: T,
-}
-
-impl<T> StorageIter<T> {
-    pub fn new(data: T) -> Self {
-        Self { data }
-    }
-}
-
-impl<T> Iterator for StorageIter<T>
-where
-    T: DoubleEndedIterator,
-    T::Item: TryInto<Block>,
-{
-    type Item = Block;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.data.next_back().and_then(|v| match v.try_into() {
-            Ok(block) => Some(block),
-            Err(_) => None,
-        })
-    }
-}
-
-impl TryFrom<std::prelude::v1::Result<(IVec, IVec), sled::Error>> for Block {
-    type Error = anyhow::Error;
-
-    fn try_from(
-        value: std::prelude::v1::Result<(IVec, IVec), sled::Error>,
-    ) -> std::prelude::v1::Result<Self, Self::Error> {
-        let data: String = match value {
-            Ok((_, v2)) => from_utf8(v2.as_ref())?.into(),
-            Err(e) => return Err(anyhow!(e)),
-        };
-
-        Block::deserialize(data.as_str())
     }
 }

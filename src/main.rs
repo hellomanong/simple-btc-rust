@@ -5,8 +5,11 @@ use block::Block;
 use blockchain::Blockchain;
 use clap::Parser;
 use cli::Cli;
+use wallet::Wallets;
 
-use crate::{proof_of_work::ProofOfWork, transaction::Transaction};
+use crate::{
+    proof_of_work::ProofOfWork, transaction::Transaction, wallet::pubkey_hash_from_base58,
+};
 
 mod block;
 mod blockchain;
@@ -14,6 +17,7 @@ mod cli;
 mod error;
 mod proof_of_work;
 mod transaction;
+mod wallet;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -32,9 +36,18 @@ fn main() -> Result<()> {
             let bc = Blockchain::create_block_chain(address)?;
             println!("Done");
         }
+
+        cli::Commands::CreateWallet => {
+            let mut wallets = Wallets::new_wallets();
+            let wallet = wallets.create_wallet();
+            println!("Your new address: {wallet}")
+        }
         cli::Commands::GetBalance { address } => {
             let bc = Blockchain::new_block_chain()?;
-            let utxos = bc.find_utxo(address.as_str())?;
+
+            let pubek_hash = pubkey_hash_from_base58(address.as_str())?;
+
+            let utxos = bc.find_utxo(pubek_hash.as_str())?;
             let mut balance = 0;
             for out in utxos {
                 balance += out.value;
@@ -44,8 +57,8 @@ fn main() -> Result<()> {
         }
         cli::Commands::Send { from, to, amount } => {
             let mut bc = Blockchain::new_block_chain()?;
-            let tx = Transaction::new_utxo_transction(from, to, amount, &bc)?;
-            bc.mine_block(vec![tx]);
+            let tx = Transaction::new_utxo_transaction(from, to, amount, &bc)?;
+            bc.mine_block(vec![tx])?;
             println!("Success!");
         }
         cli::Commands::PrintChain => {

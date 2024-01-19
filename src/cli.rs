@@ -22,6 +22,7 @@ pub enum Commands {
     /// Create block chain
     #[command(name = "createblockchain")]
     CreateBlockChain {
+        /// 创世的地址
         #[arg(short, long)]
         address: String,
     },
@@ -39,4 +40,6 @@ pub enum Commands {
         #[arg(short, long)]
         amount: isize,
     },
+    #[command(name = "createwallet")]
+    CreateWallet,
 }
