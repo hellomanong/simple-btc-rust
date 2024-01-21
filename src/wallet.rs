@@ -1,4 +1,10 @@
-use std::{collections::HashMap, hash::Hasher, str::from_utf8};
+use std::{
+    collections::HashMap,
+    fs::OpenOptions,
+    hash::Hasher,
+    io::{self, Read, Write},
+    str::from_utf8,
+};
 
 use anyhow::anyhow;
 use base58::{FromBase58, ToBase58};
@@ -13,19 +19,26 @@ use p256::{
 };
 
 use ripemd::Ripemd160;
+use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 
 const VERSION: u8 = 0x00;
 const ADDRESS_CHECK_SUM_LEN: usize = 4;
+const WALLET_FILE: &str = "./wallet.dat";
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Wallets {
     wallets: HashMap<String, Wallet>,
 }
 
 impl Wallets {
-    pub fn new_wallets() -> Self {
-        Default::default()
+    pub fn new_wallets() -> anyhow::Result<Self> {
+        let mut wallets = Self {
+            ..Default::default()
+        };
+
+        wallets.load_from_file()?;
+        Ok(wallets)
     }
 }
 
@@ -45,9 +58,45 @@ impl Wallets {
             .map_or(Err(anyhow!("Get wallet, return None")), |v| Ok(v));
         wallet
     }
+
+    pub fn save_to_file(&self) -> io::Result<()> {
+        // 也可以直接使用 fs::write("path", "data");
+        let mut file = OpenOptions::new()
+            .write(true)
+            // .append(true)
+            .create(true)
+            .open(WALLET_FILE)?;
+
+        let data = serde_json::to_string(self)?;
+
+        file.write_all(data.as_bytes()).map_err(|e| {
+            println!("Write wallets to file err: {e}");
+            e
+        })
+    }
+
+    pub fn load_from_file(&mut self) -> anyhow::Result<()> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(WALLET_FILE)?;
+
+        let mut buf = String::new();
+        file.read_to_string(&mut buf).map_err(|e| {
+            println!("Read wallets file err: {e}");
+            e
+        })?;
+
+        if !buf.is_empty() {
+            let wallets = serde_json::from_str::<Wallets>(buf.as_str())?;
+            self.wallets = wallets.wallets;
+        }
+        Ok(())
+    }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct Wallet {
     pub secret_key: Vec<u8>,
     pub public_key: Vec<u8>,

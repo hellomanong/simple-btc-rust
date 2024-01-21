@@ -72,6 +72,12 @@ impl Blockchain {
 
 impl Blockchain {
     pub fn mine_block(&mut self, txes: Vec<Transaction>) -> Result<()> {
+        for tx in txes.iter() {
+            if !tx.verify()? {
+                return Err(anyhow!("Verity tx failed"));
+            }
+        }
+
         let db = self.db.open_tree(BLOCKS)?;
 
         let res: Result<String, TransactionError<anyhow::Error>> =
@@ -136,7 +142,8 @@ impl Blockchain {
                     }
 
                     // 一笔交易虽然有多条输出，属于这个地址的输出只有一条
-                    if out.is_locked_with_key(pubkey_hash) {
+                    if out.is_locked_with_key(pubkey_hash) {        
+                        // println!("------------unspent_tx:{tx:?}------------");
                         unsepent_txs.push(tx.clone());
                     }
                 }
@@ -144,7 +151,8 @@ impl Blockchain {
                 if !tx.is_coinbase() {
                     for i in tx.vin {
                         if i.uses_key(pubkey_hash) {
-                            let vec_txos = spent_txos.entry(i.txid).or_insert(vec![i.vout]);
+                            // println!("------------i.txid:{:?}------------", i.txid);
+                            let vec_txos: &mut Vec<isize> = spent_txos.entry(i.txid).or_insert(vec![]);
                             vec_txos.push(i.vout);
                         }
                     }
@@ -173,6 +181,8 @@ impl Blockchain {
             utxo.extend(outs);
         }
 
+        // println!("-----------find_utxo--utxo:{utxo:?}----------------------");
+
         Ok(utxo)
     }
 
@@ -190,9 +200,7 @@ impl Blockchain {
             for (index, out) in tx.vout.iter().enumerate() {
                 if out.is_locked_with_key(pubkey_hash) && accumulated < amount {
                     accumulated += out.value;
-                    let vec_index = unspent_outputs
-                        .entry(tx.id.clone())
-                        .or_insert(vec![index as _]);
+                    let vec_index = unspent_outputs.entry(tx.id.clone()).or_insert(vec![]);
 
                     vec_index.push(index as _);
                     if accumulated >= amount {

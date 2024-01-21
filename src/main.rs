@@ -38,9 +38,10 @@ fn main() -> Result<()> {
         }
 
         cli::Commands::CreateWallet => {
-            let mut wallets = Wallets::new_wallets();
-            let wallet = wallets.create_wallet();
-            println!("Your new address: {wallet}")
+            let mut wallets = Wallets::new_wallets()?;
+            let address = wallets.create_wallet();
+            wallets.save_to_file()?;
+            println!("Your new address: {address}")
         }
         cli::Commands::GetBalance { address } => {
             let bc = Blockchain::new_block_chain()?;
