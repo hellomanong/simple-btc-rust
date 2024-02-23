@@ -9,7 +9,7 @@ use crate::{
     block::Block,
     transaction::{Transaction, TxOutput},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use sled::{
     transaction::{ConflictableTransactionError, TransactionError},
     IVec,
@@ -73,7 +73,7 @@ impl Blockchain {
 impl Blockchain {
     pub fn mine_block(&mut self, txes: Vec<Transaction>) -> Result<()> {
         for tx in txes.iter() {
-            if !tx.verify()? {
+            if !self.verify_transaction(tx)? {
                 return Err(anyhow!("Verity tx failed"));
             }
         }
@@ -117,7 +117,7 @@ impl Blockchain {
         }
     }
 
-    // 暂时从所有的区块中获取为花费的交易
+    // 暂时从所有的区块中获取未花费的交易
     pub fn find_unspent_transactions(&self, pubkey_hash: &str) -> Result<Vec<Transaction>> {
         let mut unsepent_txs = vec![];
         // vec中存储的是一笔交易中的已经花费的输出的索引
@@ -212,6 +212,44 @@ impl Blockchain {
 
         Ok((accumulated, unspent_outputs))
     }
+
+    pub fn find_transaction(&self, id: &str) -> Result<Transaction> {
+
+        let mut bci = self.iterator();
+        loop {
+            let block: Block = bci.next()?;
+            for tx in block.transactions {
+                if tx.id.eq(id) {
+                    return Ok(tx);
+                }
+            }
+
+            if block.prev_block_hash.is_empty() {
+                return Err(anyhow!("Do not cantains this tx"));
+            }
+        }
+
+    }
+
+    pub fn sign_transaction(&self, tx: &mut Transaction, privkey:  &[u8]) -> Result<()> {
+        let prev_txs: Result<HashMap<String, Transaction>, _> = tx.vin.iter().map(|v| -> Result<(String, Transaction), anyhow::Error> {
+            let prev_tx = self.find_transaction(&v.txid)?;
+            Ok((prev_tx.id.clone(), prev_tx))
+        }).collect();
+
+
+        tx.sign(privkey, prev_txs?)
+    }
+
+    pub fn verify_transaction(&self, tx: &Transaction) -> Result<bool> {
+        let prev_txs: Result<HashMap<String, Transaction>, _> = tx.vin.iter().map(|v| -> Result<(String, Transaction), anyhow::Error> {
+            let prev_tx = self.find_transaction(&v.txid)?;
+            Ok((prev_tx.id.clone(), prev_tx))
+        }).collect();
+
+        tx.verify(prev_txs?)
+    }
+
 
     pub fn iterator(&self) -> BlockChainIter {
         BlockChainIter {

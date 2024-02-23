@@ -74,7 +74,7 @@ impl Transaction {
         amount: isize,
         bc: &Blockchain,
     ) -> Result<Transaction> {
-        let mut inputs = vec![];
+        let mut inputs: Vec<TxInput> = vec![];
         let mut outputs = vec![];
 
         let wallets = Wallets::new_wallets()?;
@@ -119,7 +119,7 @@ impl Transaction {
 
         tx.set_id()?;
 
-        tx.sign(wallet.secret_key.as_slice())?;
+        bc.sign_transaction(&mut tx, wallet.secret_key.as_slice())?;
 
         Ok(tx)
     }
@@ -151,29 +151,50 @@ impl Transaction {
 }
 
 impl Transaction {
-    pub fn sign(&mut self, privkey: &[u8]) -> Result<()> {
+    pub fn sign(&mut self, privkey: &[u8], prev_txs: HashMap<String, Transaction>) -> Result<()> {
         if self.is_coinbase() {
             return Ok(());
         }
 
+        let mut tx_copy = self.trimmed_copy();
+
         let signing_key: SigningKey<NistP256> = SigningKey::from_slice(privkey)?;
-        for (in_id, vin) in self.vin.iter_mut().enumerate() {
-            let msg = hex::decode(self.id.as_str())?;
-            let signature: Signature<NistP256> = signing_key.try_sign(msg.as_slice())?;
-            vin.signature = hex::encode(signature.to_vec());
+        for (in_id, vin) in self.vin.clone().iter().enumerate() {
+            if let Some(prev_tx) = prev_txs.get(&vin.txid) {
+                let pubkey = prev_tx.vout[vin.vout as usize].pubkey_hash.clone();
+                tx_copy.vin[in_id].pubkey = pubkey.into();
+                tx_copy.id = tx_copy.hash()?;
+                tx_copy.vin[in_id].pubkey = Vec::new();
+
+                let msg = hex::decode(tx_copy.id.as_str())?;
+                let signature: Signature<NistP256> = signing_key.try_sign(msg.as_slice())?;
+                self.vin[in_id].signature = hex::encode(signature.to_vec());
+            }
         }
 
         Ok(())
     }
 
-    pub fn verify(&self) -> Result<bool> {
-        for (in_id, vin) in self.vin.iter().enumerate() {
-            let msg = hex::decode(self.id.as_str())?;
-            let verfiying_key: VerifyingKey<NistP256> =
-                VerifyingKey::from_sec1_bytes(vin.pubkey.as_slice())?;
+    pub fn verify(&self, prev_txs: HashMap<String, Transaction>) -> Result<bool> {
+        let mut tx_copy = self.trimmed_copy();
 
-            let signature: Signature<NistP256> = Signature::from_str(vin.signature.as_str())?;
-            if let Err(_) = verfiying_key.verify(msg.as_slice(), &signature) {
+        for (in_id, vin) in self.vin.iter().enumerate() {
+            if let Some(prev_tx) = prev_txs.get(&vin.txid) {
+                let pubkey = prev_tx.vout[vin.vout as usize].pubkey_hash.clone();
+                tx_copy.vin[in_id].pubkey = pubkey.into();
+                tx_copy.id = tx_copy.hash()?;
+                tx_copy.vin[in_id].pubkey = Vec::new();
+
+                let msg = hex::decode(tx_copy.id.as_str())?;
+                let verfiying_key: VerifyingKey<NistP256> =
+                    VerifyingKey::from_sec1_bytes(vin.pubkey.as_slice())?;
+
+                let signature: Signature<NistP256> = Signature::from_str(vin.signature.as_str())?;
+                if let Err(e) = verfiying_key.verify(msg.as_slice(), &signature) {
+                    println!("verfiying_key err: {e}");
+                    return Ok(false);
+                }
+            } else {
                 return Ok(false);
             }
         }
