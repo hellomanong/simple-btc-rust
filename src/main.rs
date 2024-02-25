@@ -8,7 +8,8 @@ use cli::Cli;
 use wallet::Wallets;
 
 use crate::{
-    proof_of_work::ProofOfWork, transaction::Transaction, wallet::pubkey_hash_from_base58,
+    proof_of_work::ProofOfWork, transaction::Transaction, utxoset::UTXOSet,
+    wallet::pubkey_hash_from_base58,
 };
 
 mod block;
@@ -17,6 +18,7 @@ mod cli;
 mod error;
 mod proof_of_work;
 mod transaction;
+mod utxoset;
 mod wallet;
 
 fn main() -> Result<()> {
@@ -34,6 +36,8 @@ fn main() -> Result<()> {
         }
         cli::Commands::CreateBlockChain { address } => {
             let bc = Blockchain::create_block_chain(address)?;
+            let utxoset = UTXOSet::new(bc);
+            utxoset.reindex()?;
             println!("Done");
         }
 
@@ -48,7 +52,9 @@ fn main() -> Result<()> {
 
             let pubek_hash = pubkey_hash_from_base58(address.as_str())?;
 
-            let utxos = bc.find_utxo(pubek_hash.as_str())?;
+            let utxoset = UTXOSet::new(bc);
+
+            let utxos = utxoset.find_utxo(pubek_hash.as_str())?;
             let mut balance = 0;
             for out in utxos {
                 balance += out.value;
@@ -59,8 +65,16 @@ fn main() -> Result<()> {
         cli::Commands::Send { from, to, amount } => {
             let mut bc = Blockchain::new_block_chain()?;
             let tx = Transaction::new_utxo_transaction(from, to, amount, &bc)?;
-            bc.mine_block(vec![tx])?;
-            println!("Success!");
+            let block = bc.mine_block(vec![tx])?;
+            let utxoset = UTXOSet::new(bc);
+            utxoset.update(block)?;
+            println!("Send Success!");
+        }
+        cli::Commands::Reindex => {
+            let bc = Blockchain::new_block_chain()?;
+            let utxoset = UTXOSet::new(bc);
+            utxoset.reindex()?;
+            println!("Reindex ok!");
         }
         cli::Commands::PrintChain => {
             let bc = Blockchain::new_block_chain()?;

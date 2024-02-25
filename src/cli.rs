@@ -26,11 +26,13 @@ pub enum Commands {
         #[arg(short, long)]
         address: String,
     },
+    /// Get balance
     #[command(name = "getbalance")]
     GetBalance {
         #[arg(short, long)]
         address: String,
     },
+    /// Send to other
     #[command(name = "send")]
     Send {
         #[arg(short, long)]
@@ -40,6 +42,9 @@ pub enum Commands {
         #[arg(short, long)]
         amount: isize,
     },
+    /// Create walletssssss
     #[command(name = "createwallet")]
     CreateWallet,
+    #[command(name = "reindex")]
+    Reindex,
 }

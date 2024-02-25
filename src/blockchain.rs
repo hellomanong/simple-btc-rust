@@ -71,7 +71,7 @@ impl Blockchain {
 }
 
 impl Blockchain {
-    pub fn mine_block(&mut self, txes: Vec<Transaction>) -> Result<()> {
+    pub fn mine_block(&mut self, txes: Vec<Transaction>) -> Result<Block> {
         for tx in txes.iter() {
             if !self.verify_transaction(tx)? {
                 return Err(anyhow!("Verity tx failed"));
@@ -80,7 +80,7 @@ impl Blockchain {
 
         let db = self.db.open_tree(BLOCKS)?;
 
-        let res: Result<String, TransactionError<anyhow::Error>> =
+        let res: Result<Block, TransactionError<anyhow::Error>> =
             db.transaction(|tx_db: &sled::transaction::TransactionalTree| {
                 match tx_db.get(LAST)? {
                     Some(iv) => match from_utf8(iv.as_ref()) {
@@ -97,7 +97,7 @@ impl Blockchain {
                             )?;
 
                             tx_db.insert(LAST, block.get_hash().as_str())?;
-                            Ok(block.get_hash())
+                            Ok(block)
                         }
                         Err(e) => Err(ConflictableTransactionError::Abort(anyhow!(e))),
                     },
@@ -110,16 +110,16 @@ impl Blockchain {
 
         match res {
             Ok(v) => {
-                self.tip = v;
-                Ok(())
+                self.tip = v.get_hash();
+                Ok(v)
             }
             Err(e) => Err(anyhow!(e)),
         }
     }
 
     // 暂时从所有的区块中获取未花费的交易
-    pub fn find_unspent_transactions(&self, pubkey_hash: &str) -> Result<Vec<Transaction>> {
-        let mut unsepent_txs = vec![];
+    pub fn find_utxo(&self) -> Result<HashMap<String, Vec<TxOutput>>> {
+        let mut utxo: HashMap<String, Vec<TxOutput>> = HashMap::new();
         // vec中存储的是一笔交易中的已经花费的输出的索引
         // 使用vec 是因为，这笔交易中包含，不确定几个人的交易输出
         let mut spent_txos: HashMap<String, Vec<isize>> = HashMap::new();
@@ -139,22 +139,20 @@ impl Blockchain {
                                 continue 'Output;
                             }
                         }
-                    }
+                    }   
 
-                    // 一笔交易虽然有多条输出，属于这个地址的输出只有一条
-                    if out.is_locked_with_key(pubkey_hash) {        
-                        // println!("------------unspent_tx:{tx:?}------------");
-                        unsepent_txs.push(tx.clone());
-                    }
+                let txs =  utxo.entry(tx.id.clone()).or_insert(vec![]);
+                txs.push(out.clone());
+
                 }
 
                 if !tx.is_coinbase() {
                     for i in tx.vin {
-                        if i.uses_key(pubkey_hash) {
+                        // if i.uses_key(pubkey_hash) {
                             // println!("------------i.txid:{:?}------------", i.txid);
                             let vec_txos: &mut Vec<isize> = spent_txos.entry(i.txid).or_insert(vec![]);
                             vec_txos.push(i.vout);
-                        }
+                        // }
                     }
                 }
             }
@@ -164,54 +162,10 @@ impl Blockchain {
             }
         }
 
-        Ok(unsepent_txs)
-    }
-
-    pub fn find_utxo(&self, pubkey_hash: &str) -> Result<Vec<TxOutput>> {
-        let unspent_txs = self.find_unspent_transactions(pubkey_hash)?;
-
-        let mut utxo = vec![];
-        for tx in unspent_txs {
-            let outs: Vec<TxOutput> = tx
-                .vout
-                .into_iter()
-                .filter(|out| out.is_locked_with_key(pubkey_hash))
-                .collect();
-
-            utxo.extend(outs);
-        }
-
-        // println!("-----------find_utxo--utxo:{utxo:?}----------------------");
-
         Ok(utxo)
     }
 
-    pub fn find_spentable_outputs(
-        &self,
-        pubkey_hash: &str,
-        amount: isize,
-        // isize：余额， map：<String：address， Vec：index of txoutput>
-    ) -> Result<(isize, HashMap<String, Vec<isize>>)> {
-        let mut unspent_outputs = HashMap::<String, Vec<isize>>::default();
-        let unspent_txs = self.find_unspent_transactions(pubkey_hash)?;
-        let mut accumulated = 0;
-
-        'Work: for tx in unspent_txs {
-            for (index, out) in tx.vout.iter().enumerate() {
-                if out.is_locked_with_key(pubkey_hash) && accumulated < amount {
-                    accumulated += out.value;
-                    let vec_index = unspent_outputs.entry(tx.id.clone()).or_insert(vec![]);
-
-                    vec_index.push(index as _);
-                    if accumulated >= amount {
-                        break 'Work;
-                    }
-                }
-            }
-        }
-
-        Ok((accumulated, unspent_outputs))
-    }
+    
 
     pub fn find_transaction(&self, id: &str) -> Result<Transaction> {
 
@@ -257,6 +211,12 @@ impl Blockchain {
             db: self.db.clone(),
         }
     }
+
+    pub fn get_db(&self) -> sled::Db{
+        self.db.clone()
+    }
+
+
 }
 
 pub fn new_genesis_block(coinbase: Transaction) -> Result<Block> {

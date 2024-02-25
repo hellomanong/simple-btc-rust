@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use tracing::error;
 
 use crate::blockchain::Blockchain;
+use crate::utxoset;
+use crate::utxoset::UTXOSet;
 use crate::wallet::hash_pubkey;
 use crate::wallet::pubkey_hash_from_base58;
 use crate::wallet::Wallets;
@@ -81,8 +83,10 @@ impl Transaction {
         let wallet = wallets.get_wallet(from.as_str())?;
         let pubkey_hash = hash_pubkey(&wallet.public_key);
 
+        let utxoset = UTXOSet::new(bc.clone());
+
         let (acc, valid_outputs) =
-            bc.find_spentable_outputs(hex::encode(pubkey_hash).as_str(), amount)?;
+            utxoset.find_spentable_outputs(hex::encode(pubkey_hash).as_str(), amount)?;
 
         println!("-------------acc:{acc}----------------------");
 
